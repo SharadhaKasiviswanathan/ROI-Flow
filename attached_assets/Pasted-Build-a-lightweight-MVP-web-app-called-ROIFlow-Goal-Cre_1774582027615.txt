@@ -1,0 +1,149 @@
+Build a lightweight MVP web app called **ROIFlow**.
+
+Goal:
+Create a tool for internal operations teams to submit repetitive manual tasks and automatically receive:
+
+1. a structured summary of the problem,
+2. an ROI score,
+3. estimated monthly hours saved,
+4. automation priority ranking,
+5. and a draft n8n workflow JSON template.
+
+Core purpose:
+This is not a generic chatbot. It is an automation intake and prioritization engine for identifying the best business processes to automate first.
+
+Primary users:
+Operations teams, founders, automation engineers, CRM/admin teams.
+
+Main user flow:
+
+* User enters a repetitive manual task in a form or voice/text box
+* Example: “Every week we manually copy form responses into our CRM and notify the assigned coach by Slack”
+* The system extracts:
+
+  * task summary
+  * trigger
+  * apps involved
+  * output/action
+  * frequency
+  * estimated manual minutes per run
+  * people involved
+* The system calculates:
+
+  * monthly hours wasted
+  * automation complexity score
+  * ROI score
+  * automation priority
+* The system generates:
+
+  * a plain-English automation recommendation
+  * a suggested tool stack
+  * a draft n8n workflow JSON using only a fixed supported node catalog
+* The system stores all submissions in SQLite
+* The dashboard shows all submitted opportunities sorted by priority
+
+Requirements:
+
+* Use Python, FastAPI, SQLite, LangGraph
+* Keep the app free-first and low-token
+* Do not require any paid APIs
+* Make LLM use optional only
+* Default mode should work with rules-based logic and templates
+* Optional local Ollama support may be added behind environment variables
+* Do not use OpenAI by default
+
+Architecture:
+
+* FastAPI backend
+* simple frontend using HTML/CSS/JS or Streamlit if faster
+* SQLite for storage
+* LangGraph for the processing flow
+* n8n JSON generator using fixed templates
+
+LangGraph flow:
+
+* ingest_input
+* classify_task
+* extract_fields
+* estimate_roi
+* choose_template
+* generate_n8n_json
+* summarize_result
+
+Supported systems and keywords:
+
+* CRM
+* Slack
+* Gmail/Email
+* Google Sheets
+* QuickBooks
+* SharePoint
+* LMS
+* Webhook
+* HTTP Request
+* Schedule Trigger
+* Set
+* IF
+* Code
+
+Important rule:
+Do not let the system invent arbitrary nodes.
+Use a fixed internal catalog of supported n8n nodes and templates only.
+
+ROI formula:
+Create a simple formula using:
+
+* frequency per month
+* minutes spent each time
+* number of people involved
+* complexity penalty
+  Return:
+* monthly hours lost
+* estimated hours saved
+* ROI score out of 100
+* priority label: High, Medium, Low
+
+Pages / UI:
+
+1. Submit Opportunity
+
+   * task title
+   * process description
+   * frequency
+   * minutes per run
+   * people involved
+2. Results
+
+   * structured summary
+   * apps detected
+   * ROI score
+   * priority
+   * suggested automation
+   * draft n8n workflow JSON
+3. Dashboard
+
+   * table of all submissions
+   * sortable by ROI / priority / newest
+
+Files:
+
+* app/main.py
+* app/graph.py
+* app/state.py
+* app/roi_engine.py
+* app/classifier.py
+* app/n8n_catalog.py
+* app/n8n_builder.py
+* app/database.py
+* app/routes.py
+* templates or frontend
+* requirements.txt
+* .env.example
+* README.md
+
+Output:
+Return full runnable code, not explanation only.
+Include sample demo entries.
+Include setup instructions.
+Make the UI clean and simple.
+Optimize for fast MVP completion.

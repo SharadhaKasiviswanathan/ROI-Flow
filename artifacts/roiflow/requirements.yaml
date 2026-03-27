@@ -1,0 +1,17 @@
+packages:
+  "framer-motion": "For smooth page transitions and micro-interactions"
+  "react-hook-form": "For robust form state management"
+  "@hookform/resolvers": "For integrating Zod validation with forms"
+  "zod": "For schema validation"
+  "date-fns": "For formatting timestamps on the dashboard"
+  "react-syntax-highlighter": "For rendering the n8n JSON workflow with syntax highlighting"
+  "@types/react-syntax-highlighter": "TypeScript definitions for syntax highlighter"
+
+images:
+  - path: "artifacts/roiflow/public/images/auth-bg.png"
+    description: "Abstract dark slate and indigo gradient mesh with subtle data flow lines and glowing nodes, representing automation and technical efficiency"
+    aspect_ratio: "16:9"
+
+notes:
+  - Importing generated React Query hooks directly from @workspace/api-client-react as specified in the workspace setup.
+  - The API mutations follow the generated Orval structure: mutate({ data: payload }) for POST and mutate({ id }) for DELETE.

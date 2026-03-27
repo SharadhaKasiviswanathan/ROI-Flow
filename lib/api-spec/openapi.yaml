@@ -1,15 +1,16 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: ROIFlow API specification
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: opportunities
+    description: Automation opportunity operations
 paths:
   /healthz:
     get:
@@ -24,6 +25,102 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /opportunities:
+    get:
+      operationId: listOpportunities
+      tags: [opportunities]
+      summary: List all opportunities
+      description: Returns all submitted automation opportunities sorted by ROI score
+      parameters:
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [roi_score, priority, created_at]
+            default: roi_score
+        - name: order
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+      responses:
+        "200":
+          description: List of opportunities
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Opportunity"
+    post:
+      operationId: createOpportunity
+      tags: [opportunities]
+      summary: Submit a new automation opportunity
+      description: Processes a manual task and returns ROI analysis and n8n workflow template
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OpportunityInput"
+      responses:
+        "201":
+          description: Created opportunity with analysis
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Opportunity"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /opportunities/{id}:
+    get:
+      operationId: getOpportunity
+      tags: [opportunities]
+      summary: Get a specific opportunity
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Opportunity detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Opportunity"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteOpportunity
+      tags: [opportunities]
+      summary: Delete an opportunity
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted successfully
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -33,4 +130,107 @@ components:
           type: string
       required:
         - status
-
+    OpportunityInput:
+      type: object
+      properties:
+        title:
+          type: string
+          description: Short name for the task
+        description:
+          type: string
+          description: Detailed description of the manual process
+        frequencyPerMonth:
+          type: integer
+          description: How many times per month this task is done
+        minutesPerRun:
+          type: integer
+          description: How many minutes each run takes
+        peopleInvolved:
+          type: integer
+          description: Number of people involved in the task
+      required:
+        - title
+        - description
+        - frequencyPerMonth
+        - minutesPerRun
+        - peopleInvolved
+    Opportunity:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        description:
+          type: string
+        frequencyPerMonth:
+          type: integer
+        minutesPerRun:
+          type: integer
+        peopleInvolved:
+          type: integer
+        taskSummary:
+          type: string
+        trigger:
+          type: string
+        appsInvolved:
+          type: array
+          items:
+            type: string
+        outputAction:
+          type: string
+        monthlyHoursLost:
+          type: number
+        estimatedHoursSaved:
+          type: number
+        roiScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+        complexityScore:
+          type: integer
+          minimum: 1
+          maximum: 10
+        priority:
+          type: string
+          enum: [High, Medium, Low]
+        automationRecommendation:
+          type: string
+        suggestedToolStack:
+          type: array
+          items:
+            type: string
+        n8nWorkflowJson:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - title
+        - description
+        - frequencyPerMonth
+        - minutesPerRun
+        - peopleInvolved
+        - taskSummary
+        - trigger
+        - appsInvolved
+        - outputAction
+        - monthlyHoursLost
+        - estimatedHoursSaved
+        - roiScore
+        - complexityScore
+        - priority
+        - automationRecommendation
+        - suggestedToolStack
+        - n8nWorkflowJson
+        - createdAt
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        details:
+          type: string
+      required:
+        - error

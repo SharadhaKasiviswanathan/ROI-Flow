@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "ROIFlow"
+version = "1.0.0"
+id = "artifacts/roiflow"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 26142
+
+[services.development]
+run = "pnpm --filter @workspace/roiflow run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/roiflow", "run", "build" ]
+publicDir = "artifacts/roiflow/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "26142"
+BASE_PATH = "/"
