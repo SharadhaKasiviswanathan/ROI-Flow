@@ -21,7 +21,8 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 ```text
 artifacts-monorepo/
 ├── artifacts/              # Deployable applications
-│   ├── api-server/         # Express API server
+│   ├── api-server/         # Express API server (port 8080)
+│   ├── python-api/         # FastAPI + LangGraph AI backend (port 5000)
 │   └── roiflow/            # ROIFlow React frontend (react-vite, root path /)
 ├── lib/                    # Shared libraries
 │   ├── api-spec/           # OpenAPI spec + Orval codegen config
@@ -49,13 +50,27 @@ Users submit repetitive manual tasks and get back:
 
 ### Pages
 - `/` — Dashboard: sortable table of all submitted automation opportunities
-- `/submit` — Form to describe a manual task
-- `/results/:id` — ROI analysis, automation recommendation, and n8n JSON
+- `/submit` — Dual-mode form (Standard or AI/LangGraph) with voice input via Web Speech API and 3 demo examples
+- `/results/:id` — Standard mode: ROI analysis from Express API
+- `/results/ai-:id` — AI mode: ROI analysis from Python LangGraph API (with LLM mode badge, warnings, validation status)
+
+### Analysis Modes
+
+**Standard Mode** — uses Express API at `/api/opportunities`
+- Fast, pure rule-based TypeScript classifier, ROI engine, n8n builder
+- Results stored in PostgreSQL
+
+**AI Mode (LangGraph)** — uses Python FastAPI at `/python-api/analyze-task`
+- 8-node LangGraph pipeline: ingest → parse → extract → roi → template → n8n → validate → summarize
+- LLM-enhanced summaries: tries Ollama (local) first, falls back to rules-based
+- Results stored in `/tmp/roiflow_tasks.json`
+- Shows LLM mode badge (Ollama/rules/openai), warnings, and workflow validation status
 
 ### Core Logic (no LLM required, all rule-based)
 - **Classifier** (`artifacts/api-server/src/lib/classifier.ts`): keyword-based detection of apps, triggers, and outputs
 - **ROI Engine** (`artifacts/api-server/src/lib/roiEngine.ts`): formula using frequency, minutes, people, complexity
 - **n8n Builder** (`artifacts/api-server/src/lib/n8nBuilder.ts`): generates valid n8n workflow JSON from a fixed node catalog
+- **Python AI Pipeline** (`artifacts/python-api/`): LangGraph stateful graph with same logic in Python + optional LLM enhancement
 
 ### ROI Formula
 ```

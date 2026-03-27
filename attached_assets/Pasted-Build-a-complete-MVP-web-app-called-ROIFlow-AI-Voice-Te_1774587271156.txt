@@ -1,0 +1,219 @@
+Build a complete MVP web app called **ROIFlow AI: Voice/Text to Automation Workflow Generator**.
+
+## Goal
+
+Create an AI-powered system that:
+
+1. accepts a manual task by text or voice
+2. uses **LangGraph with Python** to process it as a stateful workflow
+3. extracts structured automation requirements
+4. calculates ROI
+5. generates a draft **n8n workflow JSON**
+6. shows results in a clean UI
+
+## Critical requirements
+
+* Must use **Python + FastAPI + LangGraph**
+* Must be **free of cost to build and test**
+* Must use **free LLM options only by default**
+* Must avoid paid APIs by default
+* Must keep token usage very low
+* Must work even if no cloud API key is available
+
+## LLM requirements
+
+Use only these free-first LLM options:
+
+1. **Ollama local models** as primary option
+2. **rules-based fallback** if no local model is available
+3. optional cloud LLM support only as an extra, not default
+
+Default priority:
+
+* first: Ollama local model
+* second: rules-based parsing
+* third: optional external provider only if manually configured later
+
+Supported default local models:
+
+* llama3.2
+* qwen2.5
+* mistral
+* gemma
+
+Create an `llm_provider.py` abstraction that supports:
+
+* `ollama`
+* `rules`
+* optional `openai` or `gemini` behind env vars only, but not used by default
+
+## Cost-control rules
+
+* Never call the LLM more than once per task
+* Use rules/keyword matching first
+* Use LLM only for one of these:
+
+  * structured extraction improvement
+  * concise summary generation
+  * workflow suggestion refinement
+* Keep prompts short and deterministic
+* Cache repeated demo inputs if possible
+* Do not use embeddings, vector DBs, or multi-call chains
+
+## Architecture
+
+Backend:
+
+* FastAPI
+* LangGraph
+* SQLite or JSON storage
+* Pydantic models
+
+Frontend:
+
+* simple HTML/CSS/JS or Streamlit
+* task title
+* process description
+* runs per month
+* minutes per run
+* people involved
+* results panel
+
+## LangGraph design
+
+Create a stateful graph with these nodes:
+
+1. ingest_input
+2. parse_task
+3. extract_entities
+4. estimate_roi
+5. choose_workflow_template
+6. generate_n8n_json
+7. validate_output
+8. summarize_result
+
+State should include:
+
+* raw_input
+* structured_task
+* apps_detected
+* trigger
+* actions
+* frequency
+* minutes
+* people
+* roi_score
+* priority
+* workflow_json
+* validation_errors
+* summary
+* llm_mode_used
+
+## Core rule-based behavior
+
+Do not rely fully on LLM.
+Implement keyword detection first:
+
+* “typeform”, “form”, “submission” → webhook trigger
+* “weekly”, “daily”, “every month” → schedule trigger
+* “crm”, “salesforce”, “hubspot” → CRM/http request node
+* “slack” → Slack node
+* “gmail”, “email” → Gmail node
+* “google sheets”, “sheet” → Google Sheets node
+
+Use fixed mappings to supported n8n nodes.
+
+## ROI engine
+
+Calculate:
+monthly_hours = runs_per_month * minutes_per_run * people / 60
+
+Priority:
+
+* High if monthly_hours > 20
+* Medium if monthly_hours between 5 and 20
+* Low if monthly_hours < 5
+
+Also generate:
+
+* ROI score out of 100
+* estimated hours saved
+* simple automation recommendation
+
+## n8n generation
+
+Generate valid JSON using only a fixed node catalog:
+
+* Webhook
+* Schedule Trigger
+* Set
+* IF
+* HTTP Request
+* Slack
+* Gmail
+* Google Sheets
+* Respond to Webhook
+
+Do not invent unsupported nodes.
+
+## API endpoints
+
+* POST /analyze-task
+* GET /tasks
+* GET /export/{id}
+
+## UI requirements
+
+Results page must show:
+
+* extracted structure
+* apps detected
+* ROI score
+* priority
+* workflow JSON
+* warnings
+* which mode was used:
+
+  * Ollama
+  * Rules-based
+
+## Free mode behavior
+
+The app must run successfully in these cases:
+
+1. Ollama installed locally
+2. no LLM available at all
+
+If no LLM is available, use rules-based mode and still generate output.
+
+## Files
+
+* app/main.py
+* app/graph.py
+* app/state.py
+* app/roi_engine.py
+* app/classifier.py
+* app/n8n_builder.py
+* app/n8n_validator.py
+* app/llm_provider.py
+* app/routes.py
+* app/database.py
+* frontend/
+* requirements.txt
+* README.md
+* .env.example
+
+## Sample inputs
+
+Include built-in examples:
+
+* client onboarding from Typeform to CRM and Slack
+* invoice reminder workflow
+* customer feedback classification
+
+## Output
+
+Return the full runnable codebase.
+Make it work locally.
+Keep the UI clean and simple.
+Optimize for free usage and low compute cost.
