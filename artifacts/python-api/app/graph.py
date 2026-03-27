@@ -1,17 +1,17 @@
 """
 LangGraph stateful workflow for ROIFlow AI.
-Nodes: ingest_input → parse_task → extract_entities → estimate_roi →
-        choose_workflow_template → generate_n8n_json → validate_output → summarize_result
+8 nodes: ingest_input → parse_task → extract_entities → estimate_roi →
+         choose_workflow_template → generate_n8n_json → validate_output → summarize_result
 """
-from typing import TypedDict, List, Annotated
+from typing import TypedDict, List
 from langgraph.graph import StateGraph, END
 from .classifier import (
     detect_apps, detect_trigger, detect_output, detect_actions,
-    generate_task_summary, generate_recommendation, suggest_tool_stack,
+    generate_task_summary, suggest_tool_stack,
 )
 from .roi_engine import calculate_roi
 from .n8n_builder import build_n8n_workflow, validate_workflow
-from .llm_provider import enhance_summary
+from .llm_provider import enhance_summary, generate_automation_recommendation
 
 
 class GraphState(TypedDict):
@@ -42,6 +42,18 @@ class GraphState(TypedDict):
     summary: str
     llm_mode_used: str
     warnings: List[str]
+
+
+NODE_LABELS = {
+    "ingest_input": "Ingesting task details",
+    "parse_task": "Parsing task structure & trigger",
+    "extract_entities": "Detecting apps and tools",
+    "estimate_roi": "Calculating ROI & complexity score",
+    "choose_workflow_template": "Selecting workflow template",
+    "generate_n8n_json": "Generating n8n workflow JSON",
+    "validate_output": "Validating workflow structure",
+    "summarize_result": "Generating AI summary",
+}
 
 
 def ingest_input(state: GraphState) -> GraphState:
@@ -78,13 +90,6 @@ def estimate_roi(state: GraphState) -> GraphState:
     state["roi_score"] = result.roi_score
     state["complexity_score"] = result.complexity_score
     state["priority"] = result.priority
-
-    state["automation_recommendation"] = generate_recommendation(
-        state["apps_detected"],
-        state["trigger"],
-        state["output_action"],
-        result.priority,
-    )
     state["suggested_tool_stack"] = suggest_tool_stack(state["apps_detected"])
     return state
 
@@ -124,14 +129,22 @@ def summarize_result(state: GraphState) -> GraphState:
         trigger=state["trigger"],
         output_action=state["output_action"],
     )
+    rec, rec_mode = generate_automation_recommendation(
+        title=state["title"],
+        description=state["description"],
+        apps=state["apps_detected"],
+        trigger=state["trigger"],
+        output=state["output_action"],
+        priority=state["priority"],
+    )
     state["summary"] = summary
+    state["automation_recommendation"] = rec
     state["llm_mode_used"] = mode
     return state
 
 
 def build_graph():
     workflow = StateGraph(GraphState)
-
     workflow.add_node("ingest_input", ingest_input)
     workflow.add_node("parse_task", parse_task)
     workflow.add_node("extract_entities", extract_entities)

@@ -1,11 +1,13 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
-import { 
-  LayoutDashboard, 
-  PlusCircle, 
+import {
+  LayoutDashboard,
+  PlusCircle,
   Activity,
   Menu,
-  X
+  X,
+  Sun,
+  Moon,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -13,24 +15,59 @@ interface LayoutProps {
   children: React.ReactNode;
 }
 
+function useTheme() {
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    const stored = localStorage.getItem("roiflow-theme");
+    if (stored === "dark" || stored === "light") return stored;
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  });
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === "dark") {
+      root.classList.add("dark");
+    } else {
+      root.classList.remove("dark");
+    }
+    localStorage.setItem("roiflow-theme", theme);
+  }, [theme]);
+
+  const toggle = () => setTheme(t => t === "dark" ? "light" : "dark");
+  return { theme, toggle };
+}
+
 export function Layout({ children }: LayoutProps) {
   const [location] = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const { theme, toggle } = useTheme();
 
   const navItems = [
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
     { href: "/submit", label: "Submit Task", icon: PlusCircle },
   ];
 
+  const ThemeButton = () => (
+    <button
+      onClick={toggle}
+      className="w-9 h-9 flex items-center justify-center rounded-xl bg-sidebar-accent text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent/80 transition-all duration-200"
+      title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+    >
+      {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+    </button>
+  );
+
   const SidebarContent = () => (
     <>
-      <div className="p-6 flex items-center gap-3">
-        <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-primary-foreground">
-          <Activity size={18} strokeWidth={2.5} />
+      <div className="p-6 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-primary-foreground">
+            <Activity size={18} strokeWidth={2.5} />
+          </div>
+          <span className="font-display font-bold text-xl tracking-wide text-sidebar-foreground">
+            ROIFlow
+          </span>
         </div>
-        <span className="font-display font-bold text-xl tracking-wide text-sidebar-foreground">
-          ROIFlow
-        </span>
+        <ThemeButton />
       </div>
 
       <div className="px-4 py-2">
@@ -40,26 +77,25 @@ export function Layout({ children }: LayoutProps) {
         <nav className="space-y-1">
           {navItems.map((item) => {
             const isActive = location === item.href || (item.href !== "/" && location.startsWith(item.href));
-            
             return (
-              <Link 
-                key={item.href} 
+              <Link
+                key={item.href}
                 href={item.href}
                 onClick={() => setIsMobileMenuOpen(false)}
                 className={`
                   flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group
-                  ${isActive 
-                    ? "bg-sidebar-primary/10 text-sidebar-primary font-medium" 
+                  ${isActive
+                    ? "bg-sidebar-primary/10 text-sidebar-primary font-medium"
                     : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
                   }
                 `}
               >
-                <item.icon 
-                  size={18} 
+                <item.icon
+                  size={18}
                   className={`
-                    transition-colors duration-200 
+                    transition-colors duration-200
                     ${isActive ? "text-sidebar-primary" : "text-sidebar-foreground/50 group-hover:text-sidebar-foreground"}
-                  `} 
+                  `}
                 />
                 {item.label}
               </Link>
@@ -67,7 +103,7 @@ export function Layout({ children }: LayoutProps) {
           })}
         </nav>
       </div>
-      
+
       <div className="mt-auto p-6">
         <div className="bg-sidebar-accent rounded-xl p-4">
           <h4 className="text-sm font-medium text-sidebar-foreground mb-1">Automation OS</h4>
@@ -89,18 +125,21 @@ export function Layout({ children }: LayoutProps) {
           </div>
           <span className="font-display font-bold text-lg">ROIFlow</span>
         </div>
-        <button 
-          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-          className="p-2 rounded-md bg-sidebar-accent text-sidebar-foreground hover:bg-sidebar-accent/80 transition-colors"
-        >
-          {isMobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
-        </button>
+        <div className="flex items-center gap-2">
+          <ThemeButton />
+          <button
+            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+            className="p-2 rounded-md bg-sidebar-accent text-sidebar-foreground hover:bg-sidebar-accent/80 transition-colors"
+          >
+            {isMobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+          </button>
+        </div>
       </div>
 
       {/* Mobile Menu Overlay */}
       <AnimatePresence>
         {isMobileMenuOpen && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -20 }}
@@ -109,7 +148,7 @@ export function Layout({ children }: LayoutProps) {
           >
             <div className="flex items-center justify-between p-4 border-b border-sidebar-border">
               <span className="font-display font-bold text-lg text-sidebar-foreground">Menu</span>
-              <button 
+              <button
                 onClick={() => setIsMobileMenuOpen(false)}
                 className="p-2 rounded-md bg-sidebar-accent text-sidebar-foreground hover:bg-sidebar-accent/80 transition-colors"
               >

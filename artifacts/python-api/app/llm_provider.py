@@ -1,93 +1,100 @@
 """
-LLM provider abstraction — free-first design.
-Priority: 1. Ollama local  2. Rules-based  3. Optional cloud (env var only)
+LLM provider using Replit AI Integrations (OpenAI proxy).
+No API key required from the user — Replit provisions it automatically.
 """
 import os
-import httpx
-import json
-from typing import Optional
+from openai import OpenAI
 
-OLLAMA_BASE_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "auto")  # auto | ollama | rules | openai | gemini
+BASE_URL = os.getenv("AI_INTEGRATIONS_OPENAI_BASE_URL")
+API_KEY = os.getenv("AI_INTEGRATIONS_OPENAI_API_KEY", "replit-ai")
 
-
-def _ollama_available() -> bool:
-    try:
-        r = httpx.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=2.0)
-        return r.status_code == 200
-    except Exception:
-        return False
+_client: OpenAI | None = None
 
 
-def _call_ollama(prompt: str) -> Optional[str]:
-    try:
-        r = httpx.post(
-            f"{OLLAMA_BASE_URL}/api/generate",
-            json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False, "options": {"num_predict": 256, "temperature": 0.1}},
-            timeout=30.0,
-        )
-        if r.status_code == 200:
-            data = r.json()
-            return data.get("response", "").strip()
-    except Exception:
-        pass
-    return None
-
-
-def _call_openai(prompt: str) -> Optional[str]:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        return None
-    try:
-        import httpx
-        r = httpx.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}"},
-            json={"model": "gpt-3.5-turbo", "messages": [{"role": "user", "content": prompt}], "max_tokens": 256},
-            timeout=15.0,
-        )
-        if r.status_code == 200:
-            return r.json()["choices"][0]["message"]["content"].strip()
-    except Exception:
-        pass
-    return None
+def get_client() -> OpenAI:
+    global _client
+    if _client is None:
+        if BASE_URL:
+            _client = OpenAI(base_url=BASE_URL, api_key=API_KEY)
+        else:
+            # Fallback: try standard OpenAI if env var present
+            _client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", "not-set"))
+    return _client
 
 
 def enhance_summary(title: str, description: str, apps: list, trigger: str, output_action: str) -> tuple[str, str]:
     """
-    Optionally enhance the summary using an LLM.
-    Returns (summary, mode_used)
+    Generate an AI-enhanced summary using Replit's OpenAI integration.
+    Falls back to rules-based if LLM is unavailable.
+    Returns (summary, mode_used).
     """
-    if LLM_PROVIDER == "rules":
-        return _rules_summary(title, apps, trigger, output_action), "rules"
-
-    if LLM_PROVIDER in ("auto", "ollama") and _ollama_available():
+    try:
+        client = get_client()
         prompt = (
-            f"You are an automation expert. Write a concise 2-sentence summary for this workflow.\n"
+            f"You are an automation consultant writing a brief 2-sentence summary for an operations team.\n"
             f"Task: {title}\n"
-            f"Description: {description[:300]}\n"
+            f"Description: {description[:400]}\n"
+            f"Apps involved: {', '.join(apps)}\n"
+            f"Trigger: {trigger}\n"
+            f"Primary action: {output_action}\n\n"
+            f"Write exactly 2 clear, professional sentences explaining what this automation does and why it's valuable."
+        )
+        response = client.chat.completions.create(
+            model="gpt-5-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_completion_tokens=200,
+        )
+        summary = response.choices[0].message.content.strip()
+        return summary, "openai:gpt-5-mini"
+    except Exception as e:
+        return _rules_summary(title, apps, trigger, output_action), f"rules (fallback: {str(e)[:60]})"
+
+
+def generate_automation_recommendation(title: str, description: str, apps: list, trigger: str, output: str, priority: str) -> tuple[str, str]:
+    """
+    Generate an AI-enhanced automation recommendation.
+    Falls back to rules-based if LLM is unavailable.
+    Returns (recommendation, mode_used).
+    """
+    try:
+        client = get_client()
+        prompt = (
+            f"You are an n8n automation expert. Write a concrete 2-3 sentence recommendation for automating this task.\n"
+            f"Task: {title}\n"
+            f"Priority: {priority}\n"
             f"Apps: {', '.join(apps)}\n"
             f"Trigger: {trigger}\n"
-            f"Action: {output_action}\n"
-            f"Summary (2 sentences max, plain English, professional tone):"
+            f"Goal: {output}\n\n"
+            f"Be specific about which n8n nodes to use and how to connect them. No markdown, plain text only."
         )
-        result = _call_ollama(prompt)
-        if result:
-            return result, f"ollama:{OLLAMA_MODEL}"
-
-    if LLM_PROVIDER == "openai" and os.getenv("OPENAI_API_KEY"):
-        prompt = f"Write a 2-sentence automation summary for: {title}. Apps: {', '.join(apps)}. Trigger: {trigger}."
-        result = _call_openai(prompt)
-        if result:
-            return result, "openai"
-
-    return _rules_summary(title, apps, trigger, output_action), "rules"
+        response = client.chat.completions.create(
+            model="gpt-5-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_completion_tokens=300,
+        )
+        rec = response.choices[0].message.content.strip()
+        return rec, "openai:gpt-5-mini"
+    except Exception as e:
+        return _rules_recommendation(apps, trigger, output, priority), f"rules (fallback: {str(e)[:60]})"
 
 
 def _rules_summary(title: str, apps: list, trigger: str, output_action: str) -> str:
     app_list = ", ".join(apps[:3]) if apps else "the connected tools"
     return (
-        f'"{title}" is a rule-based automation triggered by {trigger.lower()}, '
-        f'connecting {app_list} to {output_action.lower()} without manual intervention.'
+        f'"{title}" is a {trigger.lower()} automation connecting {app_list} to {output_action.lower()}. '
+        f"Automating this eliminates all manual steps, saving significant time for your team each month."
+    )
+
+
+def _rules_recommendation(apps: list, trigger: str, output: str, priority: str) -> str:
+    app_flow = " → ".join(apps[:3]) if apps else "your tools"
+    if priority == "High":
+        return (
+            f"High-priority: Set up a {trigger.lower()} in n8n to connect {app_flow}. "
+            f"Use a {trigger} node → IF node for validation → {output.lower()} via the relevant app node. "
+            f"This single workflow eliminates all manual steps."
+        )
+    return (
+        f"Connect {app_flow} using n8n's {trigger.lower()} to {output.lower()} automatically. "
+        f"Start with the Webhook or Schedule Trigger node, add an IF node for conditional logic, then wire in your app nodes."
     )

@@ -1,7 +1,10 @@
+import json
+import asyncio
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional
-from .graph import roiflow_graph
+from .graph import roiflow_graph, NODE_LABELS
 from .database import save_task, get_all_tasks, get_task, delete_task
 
 router = APIRouter()
@@ -15,33 +18,8 @@ class TaskInput(BaseModel):
     people_involved: int = Field(..., ge=1, le=1000)
 
 
-DEMO_INPUTS = {
-    "onboarding": TaskInput(
-        title="Client Onboarding from Typeform to CRM and Slack",
-        description="When a client submits our onboarding typeform, we manually copy their info into Salesforce CRM, create a Slack channel for them, and send a welcome email via Gmail.",
-        frequency_per_month=20,
-        minutes_per_run=15,
-        people_involved=2,
-    ),
-    "invoice": TaskInput(
-        title="Invoice Reminder Workflow",
-        description="Every week we check QuickBooks for overdue invoices and manually send reminder emails via Gmail to clients who haven't paid. We also update a tracking Google Sheets spreadsheet.",
-        frequency_per_month=4,
-        minutes_per_run=45,
-        people_involved=1,
-    ),
-    "feedback": TaskInput(
-        title="Customer Feedback Classification",
-        description="Daily we receive feedback submissions via Google Forms, manually read each one, tag them as positive/negative/neutral, and copy results to Google Sheets. We then send a Slack summary.",
-        frequency_per_month=22,
-        minutes_per_run=20,
-        people_involved=2,
-    ),
-}
-
-
-def _run_graph(task: TaskInput) -> dict:
-    initial_state = {
+def _build_initial_state(task: TaskInput) -> dict:
+    return {
         "raw_input": "",
         "title": task.title,
         "description": task.description,
@@ -66,10 +44,12 @@ def _run_graph(task: TaskInput) -> dict:
         "llm_mode_used": "rules",
         "warnings": [],
     }
-    result = roiflow_graph.invoke(initial_state)
+
+
+def _state_to_response(result: dict, task: TaskInput) -> dict:
     return {
         "title": result["title"],
-        "description": result["description"],
+        "description": result["description"] if result.get("description") else task.description,
         "frequencyPerMonth": result["frequency_per_month"],
         "minutesPerRun": result["minutes_per_run"],
         "peopleInvolved": result["people_involved"],
@@ -96,12 +76,65 @@ def _run_graph(task: TaskInput) -> dict:
 
 @router.post("/analyze-task", status_code=201)
 async def analyze_task(task: TaskInput):
+    """Run full LangGraph pipeline and return result."""
     try:
-        result = _run_graph(task)
-        saved = save_task(result)
+        initial = _build_initial_state(task)
+        result = roiflow_graph.invoke(initial)
+        response = _state_to_response(result, task)
+        saved = save_task(response)
         return saved
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/analyze-task/stream")
+async def analyze_task_stream(task: TaskInput):
+    """
+    Stream agent progress via Server-Sent Events.
+    Each LangGraph node emits a step event, then a final `done` event with the full result.
+    """
+    async def event_generator():
+        try:
+            initial = _build_initial_state(task)
+            total_nodes = len(NODE_LABELS)
+            completed = 0
+
+            # Stream node-by-node using LangGraph's stream() API
+            for step in roiflow_graph.stream(initial, stream_mode="updates"):
+                for node_name, node_output in step.items():
+                    completed += 1
+                    label = NODE_LABELS.get(node_name, node_name.replace("_", " ").title())
+                    event = {
+                        "type": "step",
+                        "node": node_name,
+                        "label": label,
+                        "completed": completed,
+                        "total": total_nodes,
+                    }
+                    yield f"data: {json.dumps(event)}\n\n"
+                    await asyncio.sleep(0.05)  # tiny delay for UI smoothness
+
+            # After streaming completes, re-invoke to get final state
+            # (stream() gives per-node diffs; we need full merged state)
+            final_state = roiflow_graph.invoke(initial)
+            response = _state_to_response(final_state, task)
+            saved = save_task(response)
+
+            done_event = {"type": "done", "result": saved}
+            yield f"data: {json.dumps(done_event)}\n\n"
+
+        except Exception as e:
+            error_event = {"type": "error", "message": str(e)}
+            yield f"data: {json.dumps(error_event)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/tasks")
@@ -123,26 +156,11 @@ async def delete_task_by_id(task_id: int):
         raise HTTPException(status_code=404, detail="Task not found")
 
 
-@router.get("/export/{task_id}")
-async def export_task(task_id: int):
-    task = get_task(task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    return {
-        "n8nWorkflow": task.get("n8nWorkflowJson", ""),
-        "task": task,
-    }
-
-
-@router.post("/demo/{demo_key}")
-async def run_demo(demo_key: str):
-    if demo_key not in DEMO_INPUTS:
-        raise HTTPException(status_code=404, detail=f"Demo '{demo_key}' not found. Available: {list(DEMO_INPUTS.keys())}")
-    task = DEMO_INPUTS[demo_key]
-    result = _run_graph(task)
-    return save_task(result)
-
-
 @router.get("/health")
 async def health():
-    return {"status": "ok", "service": "ROIFlow AI (LangGraph)"}
+    return {
+        "status": "ok",
+        "service": "ROIFlow AI (LangGraph)",
+        "llm": "Replit AI Integrations (OpenAI)",
+        "storage": "PostgreSQL",
+    }
