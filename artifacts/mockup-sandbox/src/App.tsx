@@ -104,7 +104,7 @@ function Gallery() {
           Component Preview Server
         </h1>
         <p className="text-gray-500 mb-4">
-          This server renders individual components for the workspace canvas.
+          This server renders individual components for the preview canvas.
         </p>
         <p className="text-sm text-gray-400">
           Access component previews at{" "}

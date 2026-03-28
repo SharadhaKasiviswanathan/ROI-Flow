@@ -1,171 +1,143 @@
-"""
-Dual storage: PostgreSQL (primary) + JSON file fallback.
-AI tasks are saved to PostgreSQL so they appear alongside standard tasks in the dashboard.
-"""
+from __future__ import annotations
+
 import json
 import os
-import psycopg2
-import psycopg2.extras
-from typing import Optional, List
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
 
-STORAGE_FILE = os.getenv("STORAGE_FILE", "/tmp/roiflow_tasks.json")
-DATABASE_URL = os.getenv("DATABASE_URL")
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_STORAGE_FILE = PROJECT_ROOT / ".local" / "state" / "roiflow_tasks.json"
+STORAGE_FILE = Path(os.getenv("ROIFLOW_STORAGE_FILE", DEFAULT_STORAGE_FILE))
 
-
-def _get_conn():
-    if not DATABASE_URL:
-        return None
-    try:
-        conn = psycopg2.connect(DATABASE_URL)
-        return conn
-    except Exception:
-        return None
-
-
-def save_task(task: dict) -> dict:
-    """Save task to PostgreSQL (opportunities table) and return with assigned ID."""
-    conn = _get_conn()
-    if conn:
-        try:
-            with conn:
-                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                    cur.execute("""
-                        INSERT INTO opportunities (
-                            title, description, frequency_per_month, minutes_per_run,
-                            people_involved, task_summary, trigger, apps_involved,
-                            output_action, monthly_hours_lost, estimated_hours_saved,
-                            roi_score, complexity_score, priority,
-                            automation_recommendation, suggested_tool_stack,
-                            n8n_workflow_json, source
-                        ) VALUES (
-                            %(title)s, %(description)s, %(frequencyPerMonth)s, %(minutesPerRun)s,
-                            %(peopleInvolved)s, %(taskSummary)s, %(trigger)s, %(appsDetected)s,
-                            %(outputAction)s, %(monthlyHoursLost)s, %(estimatedHoursSaved)s,
-                            %(roiScore)s, %(complexityScore)s, %(priority)s,
-                            %(automationRecommendation)s, %(suggestedToolStack)s,
-                            %(n8nWorkflowJson)s, 'langgraph'
-                        ) RETURNING id, created_at
-                    """, task)
-                    row = cur.fetchone()
-                    task = {**task, "id": row["id"], "createdAt": row["created_at"].isoformat()}
-            conn.close()
-            return task
-        except Exception as e:
-            conn.close()
-            # Fall through to JSON storage
-            pass
-
-    # Fallback: JSON file storage
-    return _save_json(task)
+SORT_FIELD_MAP = {
+    "roi_score": "roiScore",
+    "priority": "priority",
+    "created_at": "createdAt",
+}
+PRIORITY_ORDER = {"Low": 0, "Medium": 1, "High": 2}
 
 
-def get_all_tasks() -> List[dict]:
-    """Get all AI-source tasks from PostgreSQL."""
-    conn = _get_conn()
-    if conn:
-        try:
-            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                cur.execute("""
-                    SELECT * FROM opportunities
-                    WHERE source = 'langgraph'
-                    ORDER BY roi_score DESC
-                """)
-                rows = cur.fetchall()
-            conn.close()
-            return [_pg_to_api(dict(r)) for r in rows]
-        except Exception:
-            conn.close()
-    return _load_json()
+def _ensure_storage_dir() -> None:
+    STORAGE_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 
-def get_task(task_id: int) -> Optional[dict]:
-    """Get a single task by ID."""
-    conn = _get_conn()
-    if conn:
-        try:
-            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                cur.execute("SELECT * FROM opportunities WHERE id = %s", (task_id,))
-                row = cur.fetchone()
-            conn.close()
-            if row:
-                return _pg_to_api(dict(row))
-        except Exception:
-            conn.close()
-    # Fallback JSON
+def get_storage_status() -> dict[str, Any]:
     tasks = _load_json()
-    return next((t for t in tasks if t["id"] == task_id), None)
-
-
-def delete_task(task_id: int) -> bool:
-    conn = _get_conn()
-    if conn:
-        try:
-            with conn:
-                with conn.cursor() as cur:
-                    cur.execute("DELETE FROM opportunities WHERE id = %s", (task_id,))
-                    deleted = cur.rowcount > 0
-            conn.close()
-            return deleted
-        except Exception:
-            conn.close()
-    # Fallback JSON
-    tasks = _load_json()
-    new_tasks = [t for t in tasks if t["id"] != task_id]
-    if len(new_tasks) == len(tasks):
-        return False
-    _save_json_list(new_tasks)
-    return True
-
-
-def _pg_to_api(row: dict) -> dict:
-    """Convert PostgreSQL snake_case row to camelCase API response."""
     return {
-        "id": row.get("id"),
-        "title": row.get("title", ""),
-        "description": row.get("description", ""),
-        "frequencyPerMonth": row.get("frequency_per_month", 0),
-        "minutesPerRun": row.get("minutes_per_run", 0),
-        "peopleInvolved": row.get("people_involved", 0),
-        "taskSummary": row.get("task_summary", ""),
-        "trigger": row.get("trigger", ""),
-        "appsDetected": row.get("apps_involved", []) or [],
-        "outputAction": row.get("output_action", ""),
-        "monthlyHoursLost": float(row.get("monthly_hours_lost", 0)),
-        "estimatedHoursSaved": float(row.get("estimated_hours_saved", 0)),
-        "roiScore": row.get("roi_score", 0),
-        "complexityScore": row.get("complexity_score", 0),
-        "priority": row.get("priority", "Low"),
-        "automationRecommendation": row.get("automation_recommendation", ""),
-        "suggestedToolStack": row.get("suggested_tool_stack", []) or [],
-        "n8nWorkflowJson": row.get("n8n_workflow_json", ""),
-        "source": row.get("source", "langgraph"),
-        "llmModeUsed": "openai:gpt-5-mini",
-        "validationErrors": [],
-        "warnings": [],
-        "createdAt": row.get("created_at", "").isoformat() if hasattr(row.get("created_at", ""), "isoformat") else str(row.get("created_at", "")),
+        "mode": "json-file",
+        "path": str(STORAGE_FILE),
+        "tasksStored": len(tasks),
     }
 
 
-def _load_json() -> List[dict]:
-    if not os.path.exists(STORAGE_FILE):
+def save_task(task: dict[str, Any]) -> dict[str, Any]:
+    tasks = _load_json()
+    task_id = max((int(item.get("id", 0)) for item in tasks), default=0) + 1
+    normalized = _normalize_task(task)
+    normalized["id"] = task_id
+    normalized["createdAt"] = datetime.now(timezone.utc).isoformat()
+    tasks.append(normalized)
+    _save_json_list(tasks)
+    return normalized
+
+
+def get_all_tasks(sort: str = "roi_score", order: str = "desc") -> list[dict[str, Any]]:
+    tasks = _load_json()
+    sort_key = SORT_FIELD_MAP.get(sort, SORT_FIELD_MAP["roi_score"])
+    reverse = order != "asc"
+    return sorted(tasks, key=lambda task: _sort_value(task, sort_key), reverse=reverse)
+
+
+def get_task(task_id: int) -> dict[str, Any] | None:
+    tasks = _load_json()
+    return next((task for task in tasks if int(task.get("id", 0)) == task_id), None)
+
+
+def delete_task(task_id: int) -> bool:
+    tasks = _load_json()
+    remaining = [task for task in tasks if int(task.get("id", 0)) != task_id]
+    if len(remaining) == len(tasks):
+        return False
+    _save_json_list(remaining)
+    return True
+
+
+def _sort_value(task: dict[str, Any], sort_key: str) -> Any:
+    if sort_key == "priority":
+        return PRIORITY_ORDER.get(str(task.get("priority", "Low")), len(PRIORITY_ORDER))
+    if sort_key == "createdAt":
+        value = str(task.get("createdAt", ""))
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return datetime.min.replace(tzinfo=timezone.utc)
+    return float(task.get(sort_key, 0))
+
+
+def _load_json() -> list[dict[str, Any]]:
+    if not STORAGE_FILE.exists():
         return []
     try:
-        with open(STORAGE_FILE) as f:
-            return json.load(f)
+        with STORAGE_FILE.open() as handle:
+            data = json.load(handle)
     except Exception:
         return []
 
+    if not isinstance(data, list):
+        return []
 
-def _save_json(task: dict) -> dict:
-    tasks = _load_json()
-    task_id = (max((t["id"] for t in tasks), default=0) + 1)
-    task = {**task, "id": task_id, "createdAt": datetime.now(timezone.utc).isoformat()}
-    tasks.append(task)
-    _save_json_list(tasks)
-    return task
+    return [_normalize_task(item) for item in data if isinstance(item, dict)]
 
 
-def _save_json_list(tasks: list) -> None:
-    with open(STORAGE_FILE, "w") as f:
-        json.dump(tasks, f, indent=2)
+def _save_json_list(tasks: list[dict[str, Any]]) -> None:
+    _ensure_storage_dir()
+    with STORAGE_FILE.open("w") as handle:
+        json.dump(tasks, handle, indent=2)
+
+
+def _normalize_task(task: dict[str, Any]) -> dict[str, Any]:
+    apps = task.get("appsInvolved") or task.get("appsDetected") or []
+    tools = task.get("suggestedToolStack") or task.get("suggested_tool_stack") or []
+    validation_errors = task.get("validationErrors") or task.get("validation_errors") or []
+    warnings = task.get("warnings") or []
+    agent_pipeline = task.get("agentPipeline") or task.get("agent_pipeline") or []
+
+    return {
+        "id": int(task.get("id", 0)) if task.get("id") is not None else 0,
+        "title": str(task.get("title", "")).strip(),
+        "description": str(task.get("description", "")).strip(),
+        "frequencyPerMonth": int(task.get("frequencyPerMonth", task.get("frequency_per_month", 0)) or 0),
+        "minutesPerRun": int(task.get("minutesPerRun", task.get("minutes_per_run", 0)) or 0),
+        "peopleInvolved": int(task.get("peopleInvolved", task.get("people_involved", 0)) or 0),
+        "taskSummary": str(task.get("taskSummary", task.get("task_summary", task.get("summary", "")))).strip(),
+        "trigger": str(task.get("trigger", "")).strip(),
+        "appsInvolved": list(apps) if isinstance(apps, list) else [],
+        "outputAction": str(task.get("outputAction", task.get("output_action", ""))).strip(),
+        "monthlyHoursLost": float(task.get("monthlyHoursLost", task.get("monthly_hours_lost", 0)) or 0),
+        "estimatedHoursSaved": float(task.get("estimatedHoursSaved", task.get("estimated_hours_saved", 0)) or 0),
+        "roiScore": int(task.get("roiScore", task.get("roi_score", 0)) or 0),
+        "complexityScore": int(task.get("complexityScore", task.get("complexity_score", 0)) or 0),
+        "priority": str(task.get("priority", "Low")).strip() or "Low",
+        "automationRecommendation": str(
+            task.get("automationRecommendation", task.get("automation_recommendation", ""))
+        ).strip(),
+        "suggestedToolStack": list(tools) if isinstance(tools, list) else [],
+        "n8nWorkflowJson": str(task.get("n8nWorkflowJson", task.get("workflow_json", ""))).strip(),
+        "validationErrors": list(validation_errors) if isinstance(validation_errors, list) else [],
+        "summary": str(task.get("summary", "")).strip(),
+        "llmModeUsed": str(task.get("llmModeUsed", task.get("llm_mode_used", "rules"))).strip() or "rules",
+        "warnings": list(warnings) if isinstance(warnings, list) else [],
+        "source": str(task.get("source", "standard")).strip() or "standard",
+        "agentPipeline": [
+            {
+                "node": str(step.get("node", "")).strip(),
+                "label": str(step.get("label", "")).strip(),
+                "order": int(step.get("order", index + 1) or index + 1),
+                "status": str(step.get("status", "completed")).strip() or "completed",
+            }
+            for index, step in enumerate(agent_pipeline)
+            if isinstance(step, dict)
+        ],
+        "createdAt": str(task.get("createdAt", datetime.now(timezone.utc).isoformat())),
+    }

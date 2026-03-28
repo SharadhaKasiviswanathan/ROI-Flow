@@ -110,6 +110,9 @@ export function Layout({ children }: LayoutProps) {
           <p className="text-xs text-sidebar-foreground/50 leading-relaxed">
             Prioritize and automate operations safely and efficiently.
           </p>
+          <p className="text-[11px] text-sidebar-foreground/40 mt-3">
+            Built by Sharadha Kasiviswanathan
+          </p>
         </div>
       </div>
     </>

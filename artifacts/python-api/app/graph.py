@@ -1,9 +1,9 @@
 """
 LangGraph stateful workflow for ROIFlow AI.
-8 nodes: ingest_input → parse_task → extract_entities → estimate_roi →
-         choose_workflow_template → generate_n8n_json → validate_output → summarize_result
+The graph models specialist "agents" that inspect the task, score ROI,
+assemble a workflow, validate it, and write the final recommendation.
 """
-from typing import TypedDict, List
+from typing import Any, TypedDict, List
 from langgraph.graph import StateGraph, END
 from .classifier import (
     detect_apps, detect_trigger, detect_output, detect_actions,
@@ -45,40 +45,55 @@ class GraphState(TypedDict):
 
 
 NODE_LABELS = {
-    "ingest_input": "Ingesting task details",
-    "parse_task": "Parsing task structure & trigger",
-    "extract_entities": "Detecting apps and tools",
-    "estimate_roi": "Calculating ROI & complexity score",
-    "choose_workflow_template": "Selecting workflow template",
-    "generate_n8n_json": "Generating n8n workflow JSON",
-    "validate_output": "Validating workflow structure",
-    "summarize_result": "Generating AI summary",
+    "intake_agent": "Intake agent captures the task",
+    "process_analyst_agent": "Process analyst maps the trigger and output",
+    "tool_discovery_agent": "Tool discovery agent identifies apps and actions",
+    "roi_analyst_agent": "ROI analyst scores impact and complexity",
+    "workflow_architect_agent": "Workflow architect drafts the n8n automation",
+    "workflow_builder_agent": "Workflow builder renders the workflow JSON",
+    "workflow_validator_agent": "Workflow validator checks the graph",
+    "summary_agent": "Summary agent writes the recommendation",
 }
 
+NODE_SEQUENCE = list(NODE_LABELS.keys())
 
-def ingest_input(state: GraphState) -> GraphState:
+
+def build_agent_pipeline() -> list[dict[str, Any]]:
+    return [
+        {
+            "node": node_name,
+            "label": NODE_LABELS[node_name],
+            "order": index + 1,
+            "status": "completed",
+        }
+        for index, node_name in enumerate(NODE_SEQUENCE)
+    ]
+
+
+def intake_agent(state: GraphState) -> GraphState:
     state["raw_input"] = f"{state.get('title', '')} | {state.get('description', '')}"
     state["warnings"] = []
     state["validation_errors"] = []
     if not state.get("title"):
         state["warnings"].append("No title provided — using description as title")
         state["title"] = state.get("description", "Untitled Task")[:60]
+    state["task_summary"] = state.get("task_summary", "")
     return state
 
 
-def parse_task(state: GraphState) -> GraphState:
+def process_analyst_agent(state: GraphState) -> GraphState:
     state["trigger"] = detect_trigger(state["description"])
     state["output_action"] = detect_output(state["description"])
     return state
 
 
-def extract_entities(state: GraphState) -> GraphState:
+def tool_discovery_agent(state: GraphState) -> GraphState:
     state["apps_detected"] = detect_apps(state["description"])
     state["actions"] = detect_actions(state["description"])
     return state
 
 
-def estimate_roi(state: GraphState) -> GraphState:
+def roi_analyst_agent(state: GraphState) -> GraphState:
     result = calculate_roi(
         frequency_per_month=state["frequency_per_month"],
         minutes_per_run=state["minutes_per_run"],
@@ -94,7 +109,7 @@ def estimate_roi(state: GraphState) -> GraphState:
     return state
 
 
-def choose_workflow_template(state: GraphState) -> GraphState:
+def workflow_architect_agent(state: GraphState) -> GraphState:
     state["task_summary"] = generate_task_summary(
         state["title"],
         state["trigger"],
@@ -104,7 +119,7 @@ def choose_workflow_template(state: GraphState) -> GraphState:
     return state
 
 
-def generate_n8n_json(state: GraphState) -> GraphState:
+def workflow_builder_agent(state: GraphState) -> GraphState:
     state["workflow_json"] = build_n8n_workflow(
         state["title"],
         state["trigger"],
@@ -113,7 +128,7 @@ def generate_n8n_json(state: GraphState) -> GraphState:
     return state
 
 
-def validate_output(state: GraphState) -> GraphState:
+def workflow_validator_agent(state: GraphState) -> GraphState:
     errors = validate_workflow(state["workflow_json"])
     state["validation_errors"] = errors
     if errors:
@@ -121,15 +136,15 @@ def validate_output(state: GraphState) -> GraphState:
     return state
 
 
-def summarize_result(state: GraphState) -> GraphState:
-    summary, mode = enhance_summary(
+def summary_agent(state: GraphState) -> GraphState:
+    summary, summary_mode, summary_warning = enhance_summary(
         title=state["title"],
         description=state["description"],
         apps=state["apps_detected"],
         trigger=state["trigger"],
         output_action=state["output_action"],
     )
-    rec, rec_mode = generate_automation_recommendation(
+    recommendation, recommendation_mode, recommendation_warning = generate_automation_recommendation(
         title=state["title"],
         description=state["description"],
         apps=state["apps_detected"],
@@ -138,31 +153,35 @@ def summarize_result(state: GraphState) -> GraphState:
         priority=state["priority"],
     )
     state["summary"] = summary
-    state["automation_recommendation"] = rec
-    state["llm_mode_used"] = mode
+    state["automation_recommendation"] = recommendation
+    state["llm_mode_used"] = recommendation_mode if recommendation_mode != "rules" else summary_mode
+
+    for warning in (summary_warning, recommendation_warning):
+        if warning and warning not in state["warnings"]:
+            state["warnings"].append(warning)
     return state
 
 
 def build_graph():
     workflow = StateGraph(GraphState)
-    workflow.add_node("ingest_input", ingest_input)
-    workflow.add_node("parse_task", parse_task)
-    workflow.add_node("extract_entities", extract_entities)
-    workflow.add_node("estimate_roi", estimate_roi)
-    workflow.add_node("choose_workflow_template", choose_workflow_template)
-    workflow.add_node("generate_n8n_json", generate_n8n_json)
-    workflow.add_node("validate_output", validate_output)
-    workflow.add_node("summarize_result", summarize_result)
+    workflow.add_node("intake_agent", intake_agent)
+    workflow.add_node("process_analyst_agent", process_analyst_agent)
+    workflow.add_node("tool_discovery_agent", tool_discovery_agent)
+    workflow.add_node("roi_analyst_agent", roi_analyst_agent)
+    workflow.add_node("workflow_architect_agent", workflow_architect_agent)
+    workflow.add_node("workflow_builder_agent", workflow_builder_agent)
+    workflow.add_node("workflow_validator_agent", workflow_validator_agent)
+    workflow.add_node("summary_agent", summary_agent)
 
-    workflow.set_entry_point("ingest_input")
-    workflow.add_edge("ingest_input", "parse_task")
-    workflow.add_edge("parse_task", "extract_entities")
-    workflow.add_edge("extract_entities", "estimate_roi")
-    workflow.add_edge("estimate_roi", "choose_workflow_template")
-    workflow.add_edge("choose_workflow_template", "generate_n8n_json")
-    workflow.add_edge("generate_n8n_json", "validate_output")
-    workflow.add_edge("validate_output", "summarize_result")
-    workflow.add_edge("summarize_result", END)
+    workflow.set_entry_point("intake_agent")
+    workflow.add_edge("intake_agent", "process_analyst_agent")
+    workflow.add_edge("process_analyst_agent", "tool_discovery_agent")
+    workflow.add_edge("tool_discovery_agent", "roi_analyst_agent")
+    workflow.add_edge("roi_analyst_agent", "workflow_architect_agent")
+    workflow.add_edge("workflow_architect_agent", "workflow_builder_agent")
+    workflow.add_edge("workflow_builder_agent", "workflow_validator_agent")
+    workflow.add_edge("workflow_validator_agent", "summary_agent")
+    workflow.add_edge("summary_agent", END)
 
     return workflow.compile()
 

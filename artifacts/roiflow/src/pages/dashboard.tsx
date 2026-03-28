@@ -1,43 +1,39 @@
 import React, { useState } from "react";
 import { Link } from "wouter";
-import { 
-  useListOpportunities, 
-  useDeleteOpportunity, 
-  ListOpportunitiesSort, 
-  ListOpportunitiesOrder 
-} from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
-import { 
-  ArrowUpDown, 
-  Trash2, 
-  Eye, 
-  PlusCircle, 
-  SearchX, 
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  ArrowUpDown,
+  BrainCircuit,
   Clock,
+  Eye,
+  PlusCircle,
+  SearchX,
+  Trash2,
   TrendingUp,
-  BrainCircuit
 } from "lucide-react";
 import { format } from "date-fns";
 import { motion } from "framer-motion";
+import { RoiGauge } from "@/components/analysis/roi-gauge";
+import { deleteOpportunity, listOpportunities, type SortField, type SortOrder } from "@/lib/api";
 
 export default function Dashboard() {
   const queryClient = useQueryClient();
-  const [sort, setSort] = useState<ListOpportunitiesSort>("roi_score");
-  const [order, setOrder] = useState<ListOpportunitiesOrder>("desc");
+  const [sort, setSort] = useState<SortField>("roi_score");
+  const [order, setOrder] = useState<SortOrder>("desc");
 
-  const { data: opportunities, isLoading, error } = useListOpportunities({
-    params: { sort, order }
+  const { data: opportunities, isLoading, error } = useQuery({
+    queryKey: ["opportunities", sort, order],
+    queryFn: () => listOpportunities({ sort, order }),
   });
 
-  const deleteMutation = useDeleteOpportunity({
-    mutation: {
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: ["/api/opportunities"] });
-      }
-    }
+  const deleteMutation = useMutation({
+    mutationFn: deleteOpportunity,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["opportunities"] });
+    },
   });
 
-  const handleSort = (newSort: ListOpportunitiesSort) => {
+  const handleSort = (newSort: SortField) => {
     if (sort === newSort) {
       setOrder(order === "asc" ? "desc" : "asc");
     } else {
@@ -48,39 +44,42 @@ export default function Dashboard() {
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
-      case "High": return "bg-destructive/10 text-destructive border-destructive/20";
-      case "Medium": return "bg-warning/10 text-warning border-warning/20";
-      case "Low": return "bg-success/10 text-success border-success/20";
-      default: return "bg-muted text-muted-foreground border-border";
+      case "High":
+        return "bg-destructive/10 text-destructive border-destructive/20";
+      case "Medium":
+        return "bg-warning/10 text-warning border-warning/20";
+      case "Low":
+        return "bg-success/10 text-success border-success/20";
+      default:
+        return "bg-muted text-muted-foreground border-border";
     }
   };
 
-  const SortButton = ({ field, label }: { field: ListOpportunitiesSort, label: string }) => (
-    <button 
+  const SortButton = ({ field, label }: { field: SortField; label: string }) => (
+    <button
       onClick={() => handleSort(field)}
       className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors group"
     >
       {label}
-      <ArrowUpDown 
-        size={14} 
-        className={`transition-colors ${sort === field ? 'text-primary' : 'text-muted-foreground/30 group-hover:text-muted-foreground'}`} 
+      <ArrowUpDown
+        size={14}
+        className={`transition-colors ${
+          sort === field ? "text-primary" : "text-muted-foreground/30 group-hover:text-muted-foreground"
+        }`}
       />
     </button>
   );
 
   return (
     <div className="space-y-8 animate-slide-up">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl md:text-4xl font-display font-bold text-foreground">
-            Automation Pipeline
-          </h1>
+          <h1 className="text-3xl md:text-4xl font-display font-bold text-foreground">Automation Pipeline</h1>
           <p className="mt-2 text-muted-foreground text-base">
             Track and prioritize manual tasks for automation based on ROI.
           </p>
         </div>
-        <Link 
+        <Link
           href="/submit"
           className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-semibold bg-primary text-primary-foreground shadow-lg shadow-primary/25 hover:shadow-xl hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200 shrink-0"
         >
@@ -89,9 +88,7 @@ export default function Dashboard() {
         </Link>
       </div>
 
-      {/* Content */}
       <div className="bg-card border border-border/50 shadow-xl shadow-black/5 rounded-2xl overflow-hidden">
-        
         {isLoading ? (
           <div className="p-8 flex flex-col gap-4">
             {[1, 2, 3, 4, 5].map((i) => (
@@ -115,7 +112,7 @@ export default function Dashboard() {
             <p className="text-muted-foreground max-w-md mx-auto mb-8 text-lg">
               Start building your automation pipeline by submitting manual tasks that are slowing down your team.
             </p>
-            <Link 
+            <Link
               href="/submit"
               className="inline-flex items-center gap-2 px-8 py-4 rounded-xl font-semibold bg-primary text-primary-foreground shadow-lg shadow-primary/25 hover:shadow-xl hover:-translate-y-1 transition-all duration-300"
             >
@@ -140,23 +137,39 @@ export default function Dashboard() {
                   <th className="p-4">
                     <SortButton field="created_at" label="Date Added" />
                   </th>
-                  <th className="p-4 text-right font-medium text-muted-foreground text-sm uppercase tracking-wider">Actions</th>
+                  <th className="p-4 text-right font-medium text-muted-foreground text-sm uppercase tracking-wider">
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/40">
                 {opportunities.map((opp, idx) => (
-                  <motion.tr 
+                  <motion.tr
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: idx * 0.05 }}
-                    key={opp.id} 
+                    key={opp.id}
                     className="group hover:bg-muted/30 transition-colors duration-200"
                   >
                     <td className="p-4">
-                      <div className="font-semibold text-foreground">{opp.title}</div>
+                      <div className="font-semibold text-foreground flex items-center gap-2 flex-wrap">
+                        <span>{opp.title}</span>
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                            opp.source === "langgraph"
+                              ? "bg-primary/10 text-primary border border-primary/20"
+                              : "bg-muted text-muted-foreground border border-border"
+                          }`}
+                        >
+                          {opp.source === "langgraph" ? "AI Agents" : "Rules"}
+                        </span>
+                      </div>
                       <div className="text-sm text-muted-foreground flex gap-1 flex-wrap mt-1">
-                        {opp.appsInvolved?.slice(0, 2).map(app => (
-                          <span key={app} className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-secondary text-secondary-foreground">
+                        {opp.appsInvolved?.slice(0, 2).map((app) => (
+                          <span
+                            key={app}
+                            className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-secondary text-secondary-foreground"
+                          >
                             {app}
                           </span>
                         ))}
@@ -168,21 +181,18 @@ export default function Dashboard() {
                       </div>
                     </td>
                     <td className="p-4">
-                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border ${getPriorityColor(opp.priority)}`}>
+                      <span
+                        className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border ${getPriorityColor(
+                          opp.priority,
+                        )}`}
+                      >
                         {opp.priority}
                       </span>
                     </td>
                     <td className="p-4">
-                      <div className="flex items-center gap-2">
-                        <div className="text-xl font-display font-bold text-foreground">
-                          {opp.roiScore}
-                        </div>
-                        <div className="w-16 h-2 bg-muted rounded-full overflow-hidden">
-                          <div 
-                            className="h-full bg-primary rounded-full transition-all duration-1000 ease-out"
-                            style={{ width: `${Math.min(100, Math.max(0, opp.roiScore))}%` }}
-                          />
-                        </div>
+                      <div className="flex items-center gap-3">
+                        <div className="text-xl font-display font-bold text-foreground min-w-[2ch]">{opp.roiScore}</div>
+                        <RoiGauge score={opp.roiScore} size="compact" className="opacity-95" />
                       </div>
                     </td>
                     <td className="p-4">
@@ -202,7 +212,7 @@ export default function Dashboard() {
                     </td>
                     <td className="p-4 text-right">
                       <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Link 
+                        <Link
                           href={`/results/${opp.id}`}
                           className="p-2 rounded-lg bg-primary/10 text-primary hover:bg-primary hover:text-primary-foreground transition-colors"
                           title="View Analysis"
@@ -212,7 +222,7 @@ export default function Dashboard() {
                         <button
                           onClick={() => {
                             if (window.confirm("Are you sure you want to delete this opportunity?")) {
-                              deleteMutation.mutate({ id: opp.id });
+                              deleteMutation.mutate(opp.id);
                             }
                           }}
                           disabled={deleteMutation.isPending}

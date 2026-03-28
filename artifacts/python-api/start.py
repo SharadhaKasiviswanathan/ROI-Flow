@@ -1,7 +1,7 @@
 import os
 import uvicorn
 
-port = int(os.getenv("PYTHON_API_PORT", "5000"))
+port = int(os.getenv("PYTHON_API_PORT", "8002"))
 
 if __name__ == "__main__":
     uvicorn.run(
